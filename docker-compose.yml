@@ -1,0 +1,22 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: dmrv_user
+      POSTGRES_PASSWORD: secure_password
+      POSTGRES_DB: dmrv_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgresql://dmrv_user:secure_password@db:5432/dmrv_db
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
