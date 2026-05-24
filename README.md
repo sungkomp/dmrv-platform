@@ -1,60 +1,34 @@
 # dMRV Enterprise Platform
 
-A modular, scalable, and secure Digital Measurement, Reporting, and Verification (dMRV) platform designed for carbon credit management.
+A modular, scalable, and secure Digital Measurement, Reporting, and Verification (dMRV) platform designed for carbon credit management, compliant with T-VER/TGO standards.
 
 ## Architecture Overview
-The platform employs a **Pluggable Modular Architecture** where core orchestration logic is decoupled from specialized domain modules. This allows for independent development, testing, and deployment of features.
-
-### Core Structure
-- **`dMRV/core/`**: Centralized orchestration, state management, and base interfaces.
-- **`dMRV/modules/`**: Independent domain modules.
-
-### Security & Privacy Features
-- **Automated Classification**: Detects Direct PII (Email, Phone, ID) and Indirect PII (GPS, IoT ID, Wallet) using regex patterns.
-- **PDPA Compliance**: Mandatory `consent_granted` check before processing any PII. Violations result in immediate workflow termination.
-- **Automated Encryption**: Confidential data is automatically encrypted (AES-256) before further processing.
-- **Data Integrity**: SHA-256 cryptographic hashing of raw evidence ensures immutability and auditability.
+The platform employs a Pluggable Modular Architecture where core orchestration logic is decoupled from specialized domain modules.
+- **Core Orchestration**: Agent-based workflow (Security, Classification, Verification, Quantifier, Ledger).
+- **Domain Modules**: Audit services for Soil GHG, Blue Carbon, Biogas, Biochar, and Waste Management.
+- **Reporting & Marketplace**: Advanced audit report generation and integrated carbon credit trading/retirement.
+- **Spatial Verification**: Spatial fencing to prevent geo-spoofing.
 
 ## Quick Start
-
-1. **Environment Setup:**
+1. **Prerequisites**: Install Docker and Docker Compose.
+2. **Setup**:
    ```bash
-   pip install sqlalchemy
-   ```
-
-2. **Database Initialization:**
-   ```bash
-   export PYTHONPATH=.
-   python3 dMRV/core/database.py
-   ```
-
-3. **Running Simulations:**
-   ```bash
-   # Run the modular workflow
-   python3 dMRV/test_modular_workflow.py
-
-   # Run individual module tests
-   python3 dMRV/test_ingestion.py
-   python3 dMRV/test_certification.py
-   ```
-
-## Development
-- Add new domains by creating a new directory under `dMRV/modules/`.
-- Ensure all modules implement the `process_request` API.
-- Secure endpoints using the `@require_role` decorator from `dMRV/modules/auth/security_utils.py`.
-
-## Deployment
-
-### Docker Deployment
-
-To run the platform using Docker, ensure you have `docker` and `docker-compose` installed.
-
-1. **Build and Run:**
-   ```bash
+   git clone <repo-url>
+   cd dMRV_upload
    docker-compose up --build
    ```
 
-2. **Configuration:**
-   - Update `docker-compose.yml` environment variables to suit your production needs.
-   - Database persistence is handled via Docker volumes.
+## Workflow Execution
+The system uses an Orchestrator pattern. To run a full integration test:
+```bash
+export PYTHONPATH=$PYTHONPATH:.
+python3 test_modular_integration.py
+```
 
+## Compliance & Standards
+- **T-VER Integration**: Automatic submission to TGO API via `TVERAdaptor`.
+- **PDPA Compliance**: Automated PII detection and encryption.
+- **Anti-Double Claiming**: Ledger-based issuance and credit retirement.
+
+## Deployment
+Use the provided `docker-compose.yml` for local deployment or containerized environments.

@@ -1,63 +1,47 @@
-from dMRV.core.fertilizer_db import FertilizerDatabase
-
-class SoilGHGAuditService:
-    # ... (methods) ...
-
+class AWDVerificationService:
+    """
+    ระบบตรวจสอบเงื่อนไข 'นาเปียกสลับแห้ง' (AWD) ตามมาตรฐาน T-VER
+    """
     @staticmethod
-    def verify_fertilizer_reduction(fertilizer_log):
-        """
-        ตรวจสอบการลดการใช้ปุ๋ยเคมีตามมาตรฐาน T-VER/IPCC
-        """
-        payload = fertilizer_log.get("payload", {})
-        saved_kg = payload.get("previous_usage_kg", 0) - payload.get("amount_kg", 0)
+    def verify_compliance(awd_data_list):
+        total_dry_days = 0
+        max_depth_reached = 0
+        has_photo_evidence = False
         
-        if saved_kg <= 0:
-            return {"status": "FAILED", "reason": "No fertilizer reduction observed"}
+        for record in awd_data_list:
+            payload = record.get('payload', {})
+            
+            # ตรวจสอบจากแหล่งข้อมูล (Source)
+            source_str = str(record.get('source'))
+            
+            # 1. ตรวจสอบจากเซนเซอร์ IoT
+            if "IOT_SENSOR" in source_str:
+                water_level = payload.get('water_level_cm', 0)
+                if water_level <= -15:
+                    max_depth_reached = min(max_depth_reached, water_level)
+                
+                if payload.get('is_dry_day'):
+                    total_dry_days += 1
+            
+            # 2. ตรวจสอบหลักฐานภาพถ่าย (จาก payload หรือ source)
+            if "PHOTO" in str(record) or "PHOTO" in str(payload):
+                has_photo_evidence = True
 
-        # ดึง Emission Factor จาก Database
-        factor = FertilizerDatabase.get_factor(payload.get("fertilizer_type", ""))
-        reduction = saved_kg * factor
-        
-        return {
-            "status": "PASSED",
-            "amount_tco2e": round(reduction, 3),
-            "methodology": "Fertilizer Emission Avoidance (Tier 1)"
-        }
-
-    @staticmethod
-    def verify_awd_reduction(awd_log, baseline_emission, area_ha):
-        """
-        ตรวจสอบการลด CH4 ตามระเบียบ T-VER
-        - baseline_emission: ค่าการปล่อยก๊าซพื้นฐาน (tCO2e/ha/crop)
-        - area_ha: พื้นที่ดำเนินโครงการ (ha)
-        """
-        # T-VER Criteria สำหรับ AWD
-        TVER_CRITERIA = {
-            "min_total_dry_days": 20,
-            "min_cycles": 3,
-            "tver_mitigation_factor": 0.48 # ตัวคูณการลดก๊าซตามมาตรฐาน T-VER
+        # เกณฑ์การตัดสิน (Conditions)
+        conditions = {
+            "depth_ok": max_depth_reached <= -15,
+            "dry_days_ok": total_dry_days >= 20,
+            "evidence_ok": has_photo_evidence
         }
         
-        payload = awd_log.get("payload", {})
-        dry_days = payload.get("dry_days", 0)
-        cycles = payload.get("cycles", 0)
-        evidence = payload.get("evidence_ref")
-
-        if not evidence:
-            return {"status": "FAILED", "reason": "Missing evidence (photo/log)"}
-
-        if dry_days < TVER_CRITERIA["min_total_dry_days"]:
-            return {"status": "FAILED", "reason": f"Insufficient cumulative dry days: {dry_days}"}
-        
-        if cycles < TVER_CRITERIA["min_cycles"]:
-            return {"status": "FAILED", "reason": f"Insufficient AWD cycles: {cycles}"}
-        
-        # คำนวณตามมาตรฐาน T-VER
-        # Reduction = Baseline * Mitigation_Factor * Area
-        reduction = baseline_emission * TVER_CRITERIA["tver_mitigation_factor"] * area_ha
+        is_compliant = all(conditions.values())
         
         return {
-            "status": "PASSED",
-            "amount_tco2e": round(reduction, 3),
-            "methodology": "T-VER-AWD-CH4-01"
+            "is_compliant": is_compliant,
+            "details": conditions,
+            "metrics": {
+                "total_dry_days": total_dry_days,
+                "max_depth_cm": max_depth_reached
+            },
+            "reduction_factor": 0.48 if is_compliant else 0.0
         }

@@ -1,14 +1,31 @@
-from dMRV.core.emission_factors import EmissionFactorRegistry
+from typing import Dict
 
-class FootprintService:
-    def calculate_footprint(self, scope, activity_type, quantity):
-        ef = EmissionFactorRegistry.get_factor(activity_type)
-        return {
-            "scope": scope,
-            "activity": activity_type,
-            "tco2e": round(quantity * ef, 4)
+class CarbonFootprintService:
+    """
+    ระบบติดตามและคำนวณรอยเท้าคาร์บอน (Carbon Footprint) ขององค์กรหรือโครงการ
+    รองรับ Scope 1, 2 และ 3
+    """
+    def __init__(self):
+        # Emission Factors (tCO2e per unit) - ข้อมูลจำลองตามมาตรฐาน อบก.
+        self.factors = {
+            "diesel_liter": 0.00268,
+            "electricity_kwh": 0.0005,
+            "waste_kg": 0.001
         }
 
-    def aggregate_footprint(self, activities_list):
-        total = sum(self.calculate_footprint(a['scope'], a['type'], a['qty'])['tco2e'] for a in activities_list)
-        return {"total_footprint_tco2e": total}
+    def calculate_emissions(self, emission_data: Dict[str, float]):
+        """
+        คำนวณการปล่อยก๊าซเรือนกระจกจากกิจกรรมต่างๆ
+        """
+        total_emissions = 0.0
+        for key, value in emission_data.items():
+            factor = self.factors.get(key, 0)
+            total_emissions += value * factor
+        
+        return round(total_emissions, 4)
+
+    def calculate_net_balance(self, footprint, credits_generated):
+        """
+        Net Carbon Balance = Credits - Footprint
+        """
+        return credits_generated - footprint

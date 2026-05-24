@@ -3,4 +3,4 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-CMD ["python3", "dMRV/core/orchestrator.py"]
+CMD ["python3", "test_modular_integration.py"]

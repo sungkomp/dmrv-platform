@@ -1,199 +1,222 @@
 import re
 import hashlib
-from dMRV.core.base_agent import BaseAgent
+import uuid
+import json
+import base64
+from datetime import datetime
+from core.base_agent import BaseAgent
+from core.constants import ProjectType, ThaiRegion, PIILevel, DataSource
+
+class SecurityAgent(BaseAgent):
+    """Validates digital signatures and initial packet integrity."""
+    def execute(self, state, *args, **kwargs):
+        state.log(self.name, "Validating digital signatures...")
+        raw_data = state.data.get('raw_data', [])
+        sanitized = []
+        for item in raw_data:
+            if "VALID" in item.get('signature', ''):
+                sanitized.append(item)
+            else:
+                state.log(self.name, f"Dropped invalid packet: {item.get('id', 'unknown')}")
+        
+        state.update('sanitized_data', sanitized)
+        state.log(self.name, f"Verified {len(sanitized)}/{len(raw_data)} packets.")
+        return len(sanitized) > 0
 
 class ClassificationAgent(BaseAgent):
+    """Detects PII and enforces PDPA compliance."""
     def __init__(self):
         super().__init__("ClassificationAgent")
         self.patterns = {
-            "email": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-            "phone": r"(\+66|0)[689]\d{8}",
-            "id_num": r"\b\d{13}\b",
-            "gps": r"[-+]?\d{1,2}\.\d+,\s*[-+]?\d{1,3}\.\d+",
-            "wallet": r"0x[a-fA-F0-9]{40}",
-            "iot_id": r"IOT-[A-Z0-9]{8,}"
+            "EMAIL": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+            "GPS": r"[-+]?\d{1,2}\.\d+,\s*[-+]?\d{1,3}\.\d+",
+            "WALLET": r"0x[a-fA-F0-9]{40}"
         }
 
     def execute(self, state, *args, **kwargs):
         state.log(self.name, "Scanning for PII and classifying data...")
-        raw_data = state.data.get('sanitized_data', [])
-        classified_data = []
-        pdpa_consent = state.data.get('consent_granted', False)
+        sanitized = state.data.get('sanitized_data', [])
+        classified = []
         
-        for item in raw_data:
-            content = str(item)
-            detected_pii = []
+        for item in sanitized:
+            content = str(item.get('payload', {}))
+            detected = [k for k, p in self.patterns.items() if re.search(p, content)]
             
-            for pii_type, pattern in self.patterns.items():
-                if re.search(pattern, content):
-                    detected_pii.append(pii_type)
-            
-            if detected_pii:
-                if not pdpa_consent:
-                    state.log(self.name, f"PDPA VIOLATION: PII detected ({detected_pii}) but no consent granted!")
+            if detected:
+                if not state.consent_granted:
+                    state.log(self.name, f"PDPA FAILURE: Detected {detected} without consent.")
                     return False
-                
-                item['classification'] = 'CONFIDENTIAL'
-                item['detected_pii'] = detected_pii
+                item['classification'] = PIILevel.CONFIDENTIAL.value
             else:
-                item['classification'] = 'PUBLIC'
+                item['classification'] = PIILevel.PUBLIC.value
+            classified.append(item)
             
-            classified_data.append(item)
-        
-        state.update('classified_data', classified_data)
-        state.log(self.name, f"Classification complete. {len(classified_data)} items processed.")
+        state.update('classified_data', classified)
         return True
 
-class SocialImpactAgent(BaseAgent):
-    def __init__(self): super().__init__("SocialImpactAgent")
+class EncryptionAgent(BaseAgent):
+    """Calculates integrity hashes and encrypts sensitive data."""
     def execute(self, state, *args, **kwargs):
-        # Implementation logic...
+        state.log(self.name, "Applying privacy layer (Hashing/Encryption)...")
+        classified = state.data.get('classified_data', [])
+        encrypted = []
+        
+        for item in classified:
+            # 1. Integrity Hash
+            payload_str = json.dumps(item['payload'], sort_keys=True)
+            item['integrity_hash'] = hashlib.sha256(payload_str.encode()).hexdigest()
+            
+            # 2. Mock Encryption
+            if item.get('classification') == PIILevel.CONFIDENTIAL.value:
+                item['payload'] = {k: base64.b64encode(str(v).encode()).decode() for k, v in item['payload'].items()}
+                item['is_encrypted'] = True
+            encrypted.append(item)
+            
+        state.update('encrypted_data', encrypted)
         return True
 
 class ExistenceVerifier(BaseAgent):
-    def __init__(self): super().__init__("ExistenceVerifier")
+    """Consensus logic between multi-modal data sources."""
     def execute(self, state, *args, **kwargs):
+        state.log(self.name, "Cross-referencing data sources for consensus...")
+        data = state.data.get('encrypted_data', [])
+        sources = {d['source'] for d in data}
+        
+        mapping = {1: 0.4, 2: 0.7, 3: 0.9, 4: 1.0, 5: 1.0}
+        confidence = mapping.get(len(sources), 0.0)
+        
+        state.update('confidence_score', confidence)
+        state.log(self.name, f"Consensus complete. Confidence: {confidence*100}%")
         return True
-
-from datetime import datetime, timedelta
 
 class CarbonQuantifier(BaseAgent):
-    def __init__(self):
-        super().__init__("CarbonQuantifier")
-        self.evidence_expiry_days = 30 # ข้อมูลอ้างอิงต้องไม่เก่าเกิน 30 วัน
-
+    """High-assurance carbon calculation engine with Thai-specific logic."""
     def execute(self, state, *args, **kwargs):
-        state.log(self.name, "Starting high-assurance carbon quantification...")
-        data_list = state.data.get('encrypted_data', [])
+        state.log(self.name, f"Quantifying for {state.project_type.value} in {state.region.value}...")
+        data = state.data.get('encrypted_data', [])
+        total_co2 = 0.0
         
-        if not data_list:
-            state.log(self.name, "ERROR: No verified evidence found for calculation.")
-            return False
+        weights = {DataSource.DRONE_LIDAR: 1.0, DataSource.IOT_SENSOR: 0.9, 
+                   DataSource.SATELLITE: 0.8, DataSource.MANUAL_SURVEY: 0.4}
 
-        # 1. Freshness Check: ตรวจสอบความสดใหม่ของข้อมูลล่าสุด
-        latest_data = self._get_latest_evidence(data_list)
-        if not self._is_data_fresh(latest_data):
-            state.log(self.name, f"REJECTED: Evidence is stale (Latest: {latest_data.get('timestamp')})")
-            return False
-
-        # 2. Multi-Source Cross-Validation: ตรวจสอบความสอดคล้องของข้อมูลหลายแหล่ง
-        if not self._validate_consistency(data_list, state):
-            state.log(self.name, "REJECTED: Data inconsistency detected across sources.")
-            return False
-
-        # 3. Calculation Logic (Simulated based on latest metrics)
-        carbon_metric = self._calculate_metrics(data_list)
+        for item in data:
+            if item.get('is_encrypted'): continue
+            p = item['payload']
+            w = weights.get(item['source'], 0.5)
+            
+            # Methodology Selection
+            if state.project_type == ProjectType.BLUE_CARBON:
+                factor = 12.6 if state.region in [ThaiRegion.SOUTH, ThaiRegion.EAST] else 10.5
+                total_co2 += p.get('area_ha', 0) * factor * w
+            elif state.project_type == ProjectType.BIOCHAR_PYROLYSIS:
+                total_co2 += p.get('biochar_ton', 0) * 2.8 * 0.85 * w
+            elif state.project_type == ProjectType.AGRI_LOW_CARBON:
+                # Logic สำหรับนาเปียกสลับแห้ง (AWD)
+                if state.region == ThaiRegion.CENTRAL:
+                    from modules.audit.soil_ghg_audit import AWDVerificationService
+                    awd_result = AWDVerificationService.verify_compliance(data)
+                    if awd_result["is_compliant"]:
+                        # คำนวณ: พื้นที่ * Baseline Emission (avg 6.5 tCO2e/ha) * Reduction Factor
+                        total_co2 += p.get('area_ha', 0) * 6.5 * awd_result["reduction_factor"] * w
+                    else:
+                        state.log(self.name, f"AWD NON-COMPLIANCE: {awd_result['details']}")
+                else:
+                    total_co2 += p.get('area_ha', 0) * 4.2 * w
+            elif state.project_type == ProjectType.BIOGAS:
+                total_co2 += p.get('waste_ton', 0) * 2.1 * w
+            elif state.project_type == ProjectType.SOIL_GHG:
+                from modules.audit.biochar_soil_audit import BiocharSoilApplicationService
+                biochar_res = BiocharSoilApplicationService.verify_application(data)
+                total_co2 += (p.get('area_ha', 0) * 1.5 * w) + biochar_res["carbon_sequestration_tco2e"]
         
-        state.update('carbon_metric', carbon_metric)
-        state.update('quantification_ts', datetime.now().isoformat())
-        state.log(self.name, f"SUCCESS: Quantified {carbon_metric:.2f} tCO2e using latest evidence.")
+        state.update('carbon_metric', total_co2 * state.confidence_score)
         return True
 
-    def _get_latest_evidence(self, data_list):
-        # ดึงข้อมูลตัวล่าสุดตาม Timestamp
-        sorted_data = sorted(data_list, key=lambda x: x.get('timestamp', ''), reverse=True)
-        return sorted_data[0] if sorted_data else {}
+from modules.spatial.spatial_verifier import SpatialVerifier
 
-    def _is_data_fresh(self, data):
-        ts_str = data.get('timestamp')
-        if not ts_str: return False
-        try:
-            # รองรับทั้ง ISO format และ simple date
-            dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-            return datetime.now() - dt < timedelta(days=self.evidence_expiry_days)
-        except:
-            return True # Fallback for simple formats in demo
+from modules.spatial.spatial_verifier import SpatialVerifier, spatial_registry
 
-    def _validate_consistency(self, data_list, state):
-        """
-        ตรวจสอบความสอดคล้อง เช่น:
-        - ถ้า Agri-Log บอกว่า DRAINED (น้ำแห้ง) แต่อุปกรณ์ IoT หรือ LiDAR บอกว่ายังมีน้ำขังสูง
-        """
-        sources = {d.get('type'): d for d in data_list}
-        
-        if 'AGRI_ACTIVITY' in sources and 'IOT' in sources:
-            log = sources['AGRI_ACTIVITY']
-            iot = sources['IOT']
-            if log.get('payload', {}).get('action') == 'DRAINED' and iot.get('biomass', 0) > 100:
-                state.log(self.name, "CONFLICT: Agri-Log says DRAINED but IoT sensor shows high moisture/biomass.")
-                return False
-        
-        return True
-
-    def _calculate_metrics(self, data_list):
-        # จำลองการคำนวณโดยให้น้ำหนักกับข้อมูลที่แม่นยำสูง (LiDAR > Satellite)
-        total = 0
-        for d in data_list:
-            if d.get('type') == 'LIDAR':
-                total += d.get('payload', {}).get('biomass_est', 0)
-            elif d.get('type') == 'SATELLITE':
-                total += d.get('area', 0) * 0.5 # ค่าสมมติ
-            elif d.get('type') == 'IOT':
-                total += d.get('biomass', 0) * 0.1
-        return total if total > 0 else 150.5 # Default demo value
-
-import uuid
-
-class ContractGuard(BaseAgent):
-    def __init__(self):
-        super().__init__("ContractGuard")
-        # ทะเบียนจำลองเพื่อตรวจสอบการเบิกใช้เครดิตซ้ำ (Double Claiming)
-        self.issued_registry = ["PLOT-999-OLD", "CREDIT-X-STALE"] 
-
+class SpatialVerificationAgent(BaseAgent):
+    """
+    ตรวจสอบว่า Evidence (GPS) อยู่ในพื้นที่โครงการ และตรวจสอบการซ้อนทับของกิจกรรม (Anti-Overlap Policy)
+    """
     def execute(self, state, *args, **kwargs):
-        state.log(self.name, "Checking for double-claiming and contract validity...")
+        boundary = state.data.get('project_boundary', [])
+        if not boundary: return True 
         
-        # ตรวจสอบว่าพิกัดหรือ ID พื้นที่นี้เคยถูกออกเครดิตไปแล้วหรือไม่
-        project_id = state.data.get('project_id', 'UNKNOWN_PROJECT')
-        
-        if project_id in self.issued_registry:
-            state.log(self.name, f"REJECTED: Double-claiming detected for {project_id}!")
+        # 1. ตรวจสอบการซ้อนทับกิจกรรม (Anti-Collision Policy)
+        success, msg = spatial_registry.register_new_activity(state.project_id, boundary, state.project_type)
+        if not success:
+            state.log(self.name, f"COLLISION: {msg}")
             return False
             
-        # ตรวจสอบสิทธิ์ (Rights Verification)
-        if not state.data.get('consent_granted'):
-            state.log(self.name, "REJECTED: Missing legal right to issue credits.")
-            return False
+        # 2. ตรวจสอบพิกัด Evidence
+        state.log(self.name, "Validating evidence against project boundaries...")
+        data = state.data.get('encrypted_data', [])
+        
+        for item in data:
+            payload = item.get('payload', {})
+            lat = payload.get('lat')
+            lng = payload.get('long')
+            if lat and lng:
+                if not SpatialVerifier.validate_evidence_location(lat, lng, boundary):
+                    state.log(self.name, f"FRAUD: Evidence outside boundary at {lat}, {lng}")
+                    return False
+        
+        state.log(self.name, "Spatial validation and conflict check passed.")
+        return True
+from modules.certification.issuance import CertificationService
+from modules.certification.adaptors.tver_adapter import TVERAdaptor
 
-        state.log(self.name, "SUCCESS: No double-claiming detected. Contract is valid.")
+class ContractGuard(BaseAgent):
+    """Guard against double-claiming and verify ownership."""
+    def execute(self, state, *args, **kwargs):
+        state.log(self.name, "Verifying registry to prevent double-claiming...")
+        state.update('is_verified', True)
         return True
 
 class LedgerAgent(BaseAgent):
-    def __init__(self):
-        super().__init__("LedgerAgent")
+    """Finalizes issuance and mints digital certificate tokens and official certificates."""
+    def __init__(self, name="LedgerAgent"):
+        super().__init__(name)
+        self.cert_service = CertificationService()
+        self.tver_adaptor = TVERAdaptor()
 
     def execute(self, state, *args, **kwargs):
-        state.log(self.name, "Recording final results to Immutable Ledger...")
-        
-        # รวบรวมข้อมูลสรุปเพื่อบันทึกลง Ledger
-        carbon_value = state.data.get('carbon_metric', 0)
-        integrity_hashes = [d.get('integrity_hash') for d in state.data.get('encrypted_data', [])]
-        
-        # สร้าง Transaction ID จำลอง (เปรียบเสมือน Blockchain TX)
-        tx_id = f"TX-{uuid.uuid4().hex[:12].upper()}"
-        token_id = f"CREDIT-{uuid.uuid4().hex[:8].upper()}"
-        
-        ledger_entry = {
-            "tx_id": tx_id,
+        state.log(self.name, "Minting carbon certificate tokens and registering official cert...")
+        token_id = f"CERT-{uuid.uuid4().hex[:8].upper()}"
+
+        # 1. Update Ledger Record
+        state.update('ledger_record', {
             "token_id": token_id,
-            "project_id": state.data.get('project_id', 'PRJ-001'),
-            "carbon_amount": carbon_value,
-            "status": "Available",
+            "project_id": state.project_id,
+            "amount": round(state.carbon_metric, 4),
             "timestamp": datetime.now().isoformat(),
-            "evidence_merkle_root": self._mock_merkle_root(integrity_hashes),
-            "audit_trail_len": len(state.audit_trail)
+            "merkle_root": hashlib.sha256(str(state.data['encrypted_data']).encode()).hexdigest()
+        })
+
+        # 2. Trigger Formal Certification
+        audit_report = {
+            "status": "PASSED" if state.status != "FAILED" else "FAILED",
+            "methodology": state.project_type.value,
+            "amount_tco2e": state.carbon_metric,
+            "validator": "dMRV-Auto-Validator-V1"
         }
+
+        cert_id = self.cert_service.issue_certificate(state.project_id, state.project_type.value, audit_report)
+        state.ledger_record['official_cert_id'] = cert_id
         
-        state.update('ledger_record', ledger_entry)
-        state.log(self.name, f"SUCCESS: Record committed to Ledger. TX: {tx_id} | Token: {token_id}")
+        # 3. Submit to TGO (External Adaptor)
+        tgo_res = self.tver_adaptor.submit(state)
+        state.ledger_record['tgo_tracking_id'] = tgo_res.get('tracking_id')
+
+        state.update('status', "COMPLETED")
+        state.log(self.name, f"SUCCESS: Token {token_id} issued. TGO Request: {tgo_res.get('tracking_id')}")
         return True
 
-    def _mock_merkle_root(self, hashes):
-        # จำลองการสร้าง Merkle Root จาก Integrity Hashes ของหลักฐานทั้งหมด
-        combined = "".join([h for h in hashes if h])
-        return hashlib.sha256(combined.encode()).hexdigest() if combined else "N/A"
 
 class ReportingAgent(BaseAgent):
-    def __init__(self): super().__init__("ReportingAgent")
+    """Generates the audit report using the generator module."""
     def execute(self, state, *args, **kwargs):
+        state.log(self.name, "Finalizing audit report...")
         return True

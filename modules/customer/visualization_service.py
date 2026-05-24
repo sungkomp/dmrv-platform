@@ -1,29 +1,38 @@
-class VisualizationService:
-    def get_digital_twin_data(self, project_id):
-        # รวบรวมพิกัด 3 มิติ และชั้นข้อมูล Layer ต่างๆ
-        return {
-            "project_id": project_id,
-            "satellite_layer": {
-                "source": "Sentinel-2",
-                "type": "Raster_Tile",
-                "url": f"https://api.sat-provider.com/tiles/{project_id}/{{z}}/{{x}}/{{y}}",
-                "opacity": 0.8
-            },
-            "terrain_layer": {
-                "source": "LiDAR_Scan_01",
-                "format": "3D_Mesh_GLB",
-                "url": "/assets/models/mangrove_terrain.glb"
-            },
-            "sensor_overlays": [
-                {
-                    "sensor_id": "IOT_001",
-                    "position": {"x": 100.501, "y": 13.751, "z": 5.2},
-                    "value": 25.5,
-                    "type": "biomass_density"
-                }
-            ],
-            "drone_flight_path": [
-                {"lat": 13.75, "lon": 100.5, "alt": 50},
-                {"lat": 13.751, "lon": 100.501, "alt": 50}
-            ]
-        }
+class GISVisualizer:
+    """
+    ระบบสร้างแผนที่แบบโต้ตอบ (Interactive Map) สำหรับแสดงพิกัดโครงการและจุดหลักฐาน
+    ผลลัพธ์จะถูกสร้างเป็นไฟล์ HTML (Leaflet.js)
+    """
+    @staticmethod
+    def generate_map(project_id, boundary_coords, evidence_points):
+        """
+        สร้างไฟล์ HTML แผนที่แสดงพื้นที่โครงการ (Polygon) และจุดข้อมูล (Markers)
+        """
+        map_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        </head>
+        <body>
+            <h3>Project Map: {project_id}</h3>
+            <div id="map" style="height: 500px; width: 100%;"></div>
+            <script>
+                var map = L.map('map').setView([{boundary_coords[0][0]}, {boundary_coords[0][1]}], 15);
+                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png').addTo(map);
+                
+                // วาดเขตพื้นที่โครงการ
+                var polygon = L.polygon({boundary_coords}, {{color: 'green'}}).addTo(map);
+                map.fitBounds(polygon.getBounds());
+
+                // วาดจุดหลักฐาน (Evidence Points)
+                {chr(10).join([f"L.marker([{p['lat']}, {p['lng']}]).addTo(map).bindPopup('{p['type']}');" for p in evidence_points])}
+            </script>
+        </body>
+        </html>
+        """
+        filename = f"map_{project_id}.html"
+        with open(filename, "w") as f:
+            f.write(map_html)
+        return filename

@@ -1,0 +1,24 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        </head>
+        <body>
+            <h3>Project Map: TH-NORTH-BIO-06</h3>
+            <div id="map" style="height: 500px; width: 100%;"></div>
+            <script>
+                var map = L.map('map').setView([18.7, 98.9], 15);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+                
+                // วาดเขตพื้นที่โครงการ
+                var polygon = L.polygon([(18.7, 98.9), (18.8, 99.0), (18.7, 99.0)], {color: 'green'}).addTo(map);
+                map.fitBounds(polygon.getBounds());
+
+                // วาดจุดหลักฐาน (Evidence Points)
+                L.marker([18.75, 98.95]).addTo(map).bindPopup('IoT Sensor');
+            </script>
+        </body>
+        </html>
+        

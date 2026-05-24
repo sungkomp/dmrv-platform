@@ -1,36 +1,36 @@
-from .state_manager import VerificationState
-from dMRV.core.agents.security_agent import SecurityAgent
-from dMRV.core.agents.encryption_agent import EncryptionAgent
-from dMRV.core.agents.all_agents import (
-    ClassificationAgent, SocialImpactAgent, ExistenceVerifier, 
+from core.state_manager import VerificationState
+from core.agents.all_agents import (
+    SecurityAgent, ClassificationAgent, EncryptionAgent, ExistenceVerifier, 
     CarbonQuantifier, ContractGuard, LedgerAgent, ReportingAgent
 )
+from core.agents.heartbeat_agent import HeartbeatMonitorAgent
 
 class Orchestrator:
     def __init__(self):
-        self.state = VerificationState()
         self.agents = {
-            "security": SecurityAgent(),
+            "heartbeat": HeartbeatMonitorAgent(),
+            "security": SecurityAgent("SecurityAgent"),
             "classifier": ClassificationAgent(),
-            "encryption": EncryptionAgent(),
-            "social": SocialImpactAgent(),
-            "verifier": ExistenceVerifier(),
-            "quantifier": CarbonQuantifier(),
-            "guard": ContractGuard(),
-            "ledger": LedgerAgent(),
-            "reporter": ReportingAgent()
+            "encryption": EncryptionAgent("EncryptionAgent"),
+            "verifier": ExistenceVerifier("ExistenceVerifier"),
+            "quantifier": CarbonQuantifier("CarbonQuantifier"),
+            "guard": ContractGuard("ContractGuard"),
+            "ledger": LedgerAgent("LedgerAgent"),
+            "reporter": ReportingAgent("ReportingAgent")
         }
-        self.modules = {}
 
-    def register_module(self, name, module):
-        self.modules[name] = module
-        print(f"Module {name} registered.")
+    def run_workflow(self, state: VerificationState):
+        print(f"\n>>> Orchestrating dMRV Workflow for: {state.project_id}")
+        pipeline = ["heartbeat", "security", "classifier", "encryption", "verifier", "quantifier", "guard", "ledger", "reporter"]
 
-    def run_workflow(self, task):
-        print(f"Orchestrating task: {task}")
-        for name, agent in self.agents.items():
-            success = agent.execute(self.state)
+        for name in pipeline:
+            agent = self.agents[name]
+            success = agent.execute(state)
             if not success:
-                print(f"Workflow interrupted at {name} agent.")
+                state.update('status', "FAILED")
+                print(f"❌ Workflow interrupted at {name} agent.")
                 return False
+
+        print(f"✅ Workflow Completed: {state.status}")
         return True
+
