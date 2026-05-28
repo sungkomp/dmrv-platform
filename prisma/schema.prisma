@@ -1,0 +1,398 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Core Models ──────────────────────────────────────────────────────────
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  methodology String   @default("T-VER") // T-VER, IPCC-2023, T-VER-FOREST
+  status      String   @default("Active") // Active, Pending, Suspended, Completed
+  areaHa      Float    @default(0)
+  location    String   @default("")
+  region      String   @default("")
+  country     String   @default("Thailand")
+  centerLat   Float    @default(13.75)
+  centerLng   Float    @default(100.5)
+  province    String   @default("")
+  startDate   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  plots             Plot[]
+  credits           CarbonCredit[]
+  certificates      Certificate[]
+  ingestionLogs     IngestionLog[]
+  submissions       Submission[]
+  auditLogs         AuditLog[]
+  iotSensors        IoTSensor[]
+  vvbReviews        VVBReview[]
+  conflictCases     ConflictCase[]
+  bufferPoolEntries BufferPoolEntry[]
+  forwardContracts  ForwardContract[]
+  deviceRegistrations DeviceRegistration[]
+}
+
+model Plot {
+  id          String   @id @default(cuid())
+  plotId      String
+  projectId   String
+  coordinates String   @default("[]") // JSON: [[lat, lng], ...]
+  ownerInfo   String   @default("")
+  trackType   String   @default("forest") // forest, biochar, awd, biogas, solar
+  areaHa      Float    @default(0)
+  status      String   @default("REGISTERED") // REGISTERED, VERIFIED, ACTIVE, INACTIVE
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model CarbonCredit {
+  id        String   @id @default(cuid())
+  tokenId   String   @unique
+  projectId String
+  amount    Float    @default(0)
+  status    String   @default("Available") // Available, Traded, Retired, Buffered
+  buyer     String   @default("") // Buyer name when traded/retired
+  metadata  String   @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bufferPoolEntry BufferPoolEntry?
+  settlement      Settlement?
+}
+
+model Certificate {
+  id                String   @id @default(cuid())
+  projectId         String
+  certId            String   @default("") // T-VER certificate reference ID
+  trackType         String   @default("forest") // forest, biochar, awd, biogas, solar
+  status            String   @default("SUBMITTED") // SUBMITTED, APPROVED, REJECTED, REVOKED
+  amountTco2e       Float    @default(0) // Certified emission reductions in tCO2e
+  issuedBy          String   @default("TGO")
+  validator         String   @default("") // VVB or T-VER validator name
+  masterCertId      String   @default("") // Master certificate ID issued on approval
+  certificateNumber String   @default("")
+  validFrom         DateTime @default(now())
+  validUntil        DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  auditTrail    AuditTrailEntry[]
+}
+
+model IngestionLog {
+  id             String   @id @default(cuid())
+  projectId      String
+  sourceType     String   // satellite, iot, drone, photo, lidar, manual
+  activityType   String   // monitoring, verification, measurement
+  payload        String   @default("{}")
+  evidenceUrl    String   @default("")
+  integrityHash  String   @default("")
+  classification String   @default("PUBLIC") // PUBLIC, CONFIDENTIAL
+  isEncrypted    Boolean  @default(false)
+  timestamp      DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model Submission {
+  id          String    @id @default(cuid())
+  projectId   String
+  type        String    @default("VERIFICATION") // VERIFICATION, CERTIFICATION, MONITORING
+  status      String    @default("PENDING") // PENDING, UNDER_REVIEW, APPROVED, REJECTED
+  data        String    @default("{}")
+  submittedBy String    @default("")
+  reviewedBy  String    @default("")
+  submittedAt DateTime  @default(now())
+  reviewedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  agentName String
+  action    String
+  projectId String?
+  details   String   @default("{}")
+  severity  String   @default("INFO") // INFO, WARNING, ERROR, CRITICAL
+  timestamp DateTime @default(now())
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+}
+
+model Alert {
+  id        String   @id @default(cuid())
+  severity  String   @default("INFO") // INFO, WARNING, CRITICAL
+  message   String
+  resolved  Boolean  @default(false)
+  timestamp DateTime @default(now())
+}
+
+model IoTSensor {
+  id          String   @id @default(cuid())
+  projectId   String
+  sensorId    String
+  sensorType  String   @default("soil_moisture") // soil_moisture, temperature, humidity, ch4, co2, water_level, ph, wind_speed, solar_irradiance
+  lat         Float    @default(0)
+  lng         Float    @default(0)
+  status      String   @default("online") // online, offline, maintenance
+  lastReading Float    @default(0)
+  unit        String   @default("")
+  battery     Int      @default(100)
+  lastSeen    DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// ─── Enterprise Models: Verification & Validation Hub ─────────────────────
+
+model VVBReview {
+  id             String   @id @default(cuid())
+  projectId      String
+  reviewerOrg    String   @default("") // VVB organization name
+  reviewerName   String   @default("")
+  reviewType     String   @default("VALIDATION") // VALIDATION, VERIFICATION, PERIODIC_VERIFICATION
+  status         String   @default("PENDING") // PENDING, IN_PROGRESS, APPROVED, REJECTED, REQUESTED_INFO
+  evidenceRefs   String   @default("[]") // JSON: list of evidence URLs/reference IDs
+  findings       String   @default("{}") // JSON: structured findings
+  recommendation String   @default("") // approve, reject, request_more_info
+  comments       String   @default("")
+  reviewedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ConflictCase {
+  id           String    @id @default(cuid())
+  projectId    String
+  title        String
+  description  String    @default("")
+  sourceA      String    @default("{}") // JSON: first data source info
+  sourceB      String    @default("{}") // JSON: second data source info
+  conflictType String    @default("DATA_MISMATCH") // DATA_MISMATCH, THRESHOLD_EXCEEDED, INTEGRITY_FAIL, SPATIAL_MISMATCH
+  severity     String    @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  status       String    @default("FLAGGED") // FLAGGED, IN_REVIEW, RESOLVED, ESCALATED
+  resolution   String    @default("")
+  resolvedBy   String    @default("")
+  evidenceUrl  String    @default("")
+  createdAt    DateTime  @default(now())
+  resolvedAt   DateTime?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// ─── Enterprise Models: Trust & Transparency ──────────────────────────────
+
+model AuditTrailEntry {
+  id            String   @id @default(cuid())
+  certificateId String
+  eventType     String   @default("ORIGIN") // ORIGIN, QUANTIFY, VERIFY, CERTIFY, MINT, TRADE, RETIRE, BUFFER
+  previousHash  String   @default("")
+  dataHash      String   @default("")
+  merkleRoot    String   @default("")
+  metadata      String   @default("{}") // JSON: event-specific data (de-identified)
+  timestamp     DateTime @default(now())
+
+  certificate Certificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+}
+
+model DeviceRegistration {
+  id              String   @id @default(cuid())
+  projectId       String
+  deviceId        String
+  deviceType      String   @default("iot") // iot, drone, satellite, lidar, manual
+  manufacturer    String   @default("")
+  model           String   @default("")
+  firmwareVersion String   @default("")
+  publicKey       String   @default("") // Hardware-level cryptographic signing key
+  signingStatus   String   @default("UNSIGNED") // UNSIGNED, SIGNED, EXPIRED, REVOKED
+  connectionStatus String  @default("disconnected") // connected, disconnected, maintenance
+  healthStatus    String   @default("UNKNOWN") // HEALTHY, DEGRADED, CRITICAL, UNKNOWN
+  lastCalibration DateTime?
+  batteryLevel    Int      @default(100)
+  signalStrength  Int      @default(0) // dBm
+  metadata        String   @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// ─── Enterprise Models: Finance & Risk Management ─────────────────────────
+
+model BufferPoolEntry {
+  id            String   @id @default(cuid())
+  projectId     String
+  creditId      String   @unique
+  amount        Float    @default(0) // tCO2e held in buffer
+  uncertaintyPct Float   @default(0) // Uncertainty percentage
+  bufferPct     Float    @default(0) // Buffer deduction percentage
+  riskCategory  String   @default("MEDIUM") // LOW, MEDIUM, HIGH, VERY_HIGH
+  reason        String   @default("")
+  releasedAt    DateTime? // When buffer credits are released
+  createdAt     DateTime @default(now())
+
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  credit  CarbonCredit  @relation(fields: [creditId], references: [id], onDelete: Cascade)
+}
+
+model ForwardContract {
+  id            String    @id @default(cuid())
+  projectId     String
+  sellerName    String    @default("")
+  buyerName     String    @default("")
+  creditAmount  Float     @default(0) // tCO2e
+  pricePerUnit  Float     @default(0) // USD per tCO2e
+  totalValue    Float     @default(0) // USD
+  deliveryDate  DateTime
+  status        String    @default("DRAFT") // DRAFT, PENDING, APPROVED, ACTIVE, COMPLETED, CANCELLED, DEFAULTED
+  terms         String    @default("{}") // JSON: contract terms
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// ─── Enterprise Models: User Experience & Integration ─────────────────────
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  name        String
+  key         String    @unique
+  permissions String    @default("[]") // JSON: list of permission scopes
+  lastUsed    DateTime?
+  status      String    @default("ACTIVE") // ACTIVE, REVOKED, EXPIRED
+  createdBy   String    @default("")
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime?
+}
+
+model Webhook {
+  id             String    @id @default(cuid())
+  url            String
+  events         String    @default("[]") // JSON: list of event types
+  secret         String    @default("")
+  status         String    @default("ACTIVE") // ACTIVE, PAUSED, FAILED
+  lastDelivery   DateTime?
+  failureCount   Int       @default(0)
+  lastFailure    String    @default("")
+  createdBy      String    @default("")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model MethodologyRule {
+  id                String   @id @default(cuid())
+  name              String
+  methodology       String   @default("T-VER")
+  trackType         String   @default("forest")
+  version           String   @default("1.0")
+  description       String   @default("")
+  formula           String   @default("{}") // JSON: formula definition with variables
+  parameters        String   @default("[]") // JSON: parameter definitions
+  conditions        String   @default("[]") // JSON: validation conditions
+  status            String   @default("DRAFT") // DRAFT, ACTIVE, DEPRECATED
+  createdBy         String   @default("")
+  aiGenerated       Boolean  @default(false) // Whether AI helped generate this rule
+  aiGenerationId    String   @default("") // Reference to AI generation session
+  sourceTemplate    String   @default("") // Template used for generation (e.g., VERRA-VM0042)
+  calculationNodes  String   @default("[]") // JSON: visual node definitions for No-Code editor
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// ─── AI Methodology Generative Studio ────────────────────────────────────
+
+model AIGenerationSession {
+  id              String   @id @default(cuid())
+  prompt          String   // User's natural language description
+  methodology     String   @default("T-VER")
+  trackType       String   @default("forest")
+  generatedFormula String  @default("{}") // JSON: AI-generated formula
+  generatedParams String   @default("[]") // JSON: AI-generated parameters
+  generatedConditions String @default("[]") // JSON: AI-generated conditions
+  generatedNodes  String   @default("[]") // JSON: AI-generated calculation nodes
+  aiModel         String   @default("z-ai-llm") // AI model used
+  status          String   @default("GENERATING") // GENERATING, COMPLETED, FAILED, APPLIED
+  ruleId          String   @default("") // Applied MethodologyRule ID if status=APPLIED
+  feedback        String   @default("") // User feedback on generation
+  createdBy       String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ─── Cross-Chain Bridge & Registry Link ──────────────────────────────────
+
+model CrossChainBridge {
+  id                String   @id @default(cuid())
+  name              String   // Connection name
+  registryType      String   // VERRA, GOLD_STANDARD, I_REC, CDM, T_VER, CUSTOM
+  endpoint          String   @default("") // API endpoint URL
+  apiKeyRef         String   @default("") // Reference to stored API key (encrypted)
+  accountId         String   @default("") // Account ID at external registry
+  accountName       String   @default("") // Account display name
+  bridgeProtocol    String   @default("API") // API, POLYGON_BRIDGE, ETHEREUM_BRIDGE, COSMOS_IBC, CUSTOM
+  status            String   @default("PENDING") // PENDING, CONNECTED, SYNCING, ERROR, DISCONNECTED
+  lastSyncAt        DateTime? // Last successful synchronization
+  syncInterval      Int      @default(3600) // Sync interval in seconds
+  totalCreditsSynced Float   @default(0) // Total credits synced through this bridge
+  metadata          String   @default("{}") // JSON: additional config
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  transactions BridgeTransaction[]
+}
+
+// ─── Settlement Model ──────────────────────────────────────────────────────
+
+model Settlement {
+  id        String   @id @default(cuid())
+  creditId  String   @unique // Reference to CarbonCredit
+  assetId   String   @default("") // Token ID of the settled asset
+  amount    Float    @default(0) // Settlement amount
+  status    String   @default("pending") // pending, processed, failed
+  timestamp DateTime @default(now())
+
+  credit CarbonCredit @relation(fields: [creditId], references: [id], onDelete: Cascade)
+}
+
+model BridgeTransaction {
+  id              String   @id @default(cuid())
+  bridgeId        String   // Reference to CrossChainBridge
+  txType          String   // MINT, TRANSFER, RETIRE, SYNC, VERIFY
+  direction       String   // OUTBOUND, INBOUND // OUTBOUND = from our platform to external, INBOUND = from external to our platform
+  creditAmount    Float    @default(0) // tCO2e
+  creditTokenId   String   @default("") // Our platform token ID
+  externalRef     String   @default("") // External registry reference/ID
+  externalStatus  String   @default("") // Status at external registry
+  txHash          String   @default("") // Blockchain tx hash (if applicable)
+  status          String   @default("PENDING") // PENDING, SUBMITTED, CONFIRMED, FAILED, ROLLED_BACK
+  errorMessage    String   @default("")
+  metadata        String   @default("{}") // JSON: additional transaction data
+  initiatedBy     String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  bridge CrossChainBridge @relation(fields: [bridgeId], references: [id], onDelete: Cascade)
+}
